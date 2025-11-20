@@ -1472,7 +1472,7 @@ class MainWindow(QMainWindow):
         if stopped_something or (
             self.timed_text_data is not None and len(self.timed_text_data) > 0
         ):
-            self._clear_highlight()
+            # self._clear_highlight()
             # The _clear_highlight function already updates _previous_highlight_range to full doc.
             # self._previous_highlight_range = (0, len(self.text_display.document().toPlainText()))
             pass  # _clear_highlight handles the range update now.
@@ -1810,15 +1810,26 @@ class MainWindow(QMainWindow):
                 found_unit_index != -1
                 and found_unit_index != self.current_sim_index
             ):
-                # Stop any ongoing playback/simulation FIRST
-                self._handle_stop()  # This also clears the highlight and resets _previous_highlight_range
-
+                # Update index to the clicked unit
                 self.current_sim_index = found_unit_index
-                # Re-apply highlight for the new current index AFTER stopping/clearing
+                
+                # Update highlight immediately
                 self._update_current_unit_highlight()
-                self.log_display.appendPlainText(
-                    f"Navigated to unit {self.current_sim_index+1}/{len(flat_units)} by selection/cursor change."
-                )
+
+                # Autoplay from the new position
+                flat_units = self._get_flat_timed_units()
+                if flat_units and self.current_sim_index < len(flat_units):
+                    start_time_sec = flat_units[self.current_sim_index].get("start_time", 0.0)
+                    
+                    if self.current_audio_path and not self.media_player.source().isEmpty():
+                        # Seek to the new time
+                        self.media_player.setPosition(int(start_time_sec * 1000))
+                        
+                        # Ensure we are ready to play (reset ignore flag)
+                        self._ignore_playback_updates = False
+                        self.media_player.play()
+                        self.status_bar.showMessage(f"Playing from unit {self.current_sim_index + 1}...")
+                        self.log_display.appendPlainText(f"Autoplay from selection: {start_time_sec:.3f}s")
 
                 # Update time base for Play/Play Section
                 # Need to re-get flat units potentially if _handle_stop rebuilds them (it doesn't currently)
