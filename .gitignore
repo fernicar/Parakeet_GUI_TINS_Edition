@@ -1,3 +1,14 @@
+*.wav
+*.mp3
+*.mkv
+*.m4a
+*.srt
+*.txt
+*.md
+*.bak
+*.ini
+model/
+
 .venv/
 venv/
 vs.code-workspace

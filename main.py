@@ -47,7 +47,7 @@ SETTINGS_ORG = "ThereIsNoSource.org"
 SETTINGS_APP = APP_NAME
 DEFAULT_WINDOW_SIZE = QSize(1024, 768)
 DEFAULT_FONT_SIZE = 11
-DEFAULT_HIGHLIGHT_COLOR = "#666688"  # Yellow
+DEFAULT_HIGHLIGHT_COLOR = "#666688"  # light blue
 DEFAULT_HIGHLIGHT_DURATION_MS = 50  # How often the timer fires for simulation
 
 
@@ -1097,18 +1097,11 @@ class MainWindow(QMainWindow):
             cursor.mergeCharFormat(self.highlight_format)
 
             # 4. Scroll to make the highlighted area visible
-            # Calculate vertical position of the highlight start
-            doc = self.text_display.document()
-            if doc:
-                block = doc.findBlock(start_char_pos)
-                if block.isValid():
-                    # Get the rectangle covering the line the highlight starts on
-                    # block_bounding_rect = self.text_display.cursorRect(cursor).boundingRect()
-                    # Scroll to make this rectangle visible
-                    self.text_display.ensureCursorVisible()
-                    # EnsureCursorVisible might scroll minimally. For centering, more complex logic needed.
-                    # block_bounding_rect = self.text_display.document().documentLayout().blockBoundingRect(block)
-                    # self.text_display.verticalScrollBar().setValue(int(block_bounding_rect.y() - self.text_display.viewport().height() / 2))
+            # Update the visible cursor to the start of the highlight so ensureCursorVisible works on it
+            visible_cursor = self.text_display.textCursor()
+            visible_cursor.setPosition(start_char_pos)
+            self.text_display.setTextCursor(visible_cursor)
+            self.text_display.ensureCursorVisible()
 
             # 5. Update the stored previous range for the next update cycle
             self._previous_highlight_range = (start_char_pos, end_char_pos)
@@ -1283,16 +1276,10 @@ class MainWindow(QMainWindow):
         """Removes highlighting from the entire text display."""
         # Use a cursor spanning the entire document
         cursor = self.text_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        cursor.movePosition(
-            QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
-        )
+        cursor.select(QTextCursor.SelectionType.Document)
         # Apply the default format to remove highlight attributes
         cursor.mergeCharFormat(self.default_format)
-        # Move cursor back to start
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        self.text_display.setTextCursor(cursor)
-        # No need to update _previous_highlight_range here, it's updated when highlight is applied
+        # Do NOT reset the visible cursor to the start, as this resets the scroll position.
 
     def _clear_highlight_range(self, start_pos: int, end_pos: int):
         """Removes highlighting from a specific text range."""
@@ -1312,6 +1299,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _handle_play(self):
         """Starts or pauses audio playback and synchronized highlight update."""
+
         if not self.timed_text_data or not self.current_audio_path:
             QMessageBox.warning(
                 self,
@@ -1382,7 +1370,8 @@ class MainWindow(QMainWindow):
                 self.media_player.setPosition(0)
 
             self.media_player.play()
-            # Highlighting will be driven by _update_highlight_from_playback connected to positionChanged
+            # Update highlight immediately and ensure scrollbar sync
+            self._update_current_unit_highlight()
             self.status_bar.showMessage("Playing audio...")
 
         self._update_ui_state()  # Update controls
