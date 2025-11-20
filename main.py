@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
         # Structure: {(sentence_idx, word_idx, char_idx): (start_char_pos, end_char_pos), ...}
         # (-1, -1, -1) means sentence key, (s_idx, w_idx, -1) for word keys, (s_idx, w_idx, c_idx) for char keys.
         self._text_pos_maps = {"Sentence": {}, "Word": {}, "Character": {}}
+        self._ignore_playback_updates = False  # Flag to prevent position reset on stop
 
         self._init_ui()
         self._load_settings()
@@ -1369,6 +1370,7 @@ class MainWindow(QMainWindow):
                 )
                 self.media_player.setPosition(0)
 
+            self._ignore_playback_updates = False  # make sure we reset the flag before playing
             self.media_player.play()
             # Update highlight immediately and ensure scrollbar sync
             self._update_current_unit_highlight()
@@ -1445,6 +1447,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _handle_stop(self):
         """Stops both audio playback and text highlighting simulation, and clears highlight."""
+        self._ignore_playback_updates = True  # make sure we reset the flag before stopping
         stopped_something = False
         if (
             self.media_player.playbackState()
@@ -1559,6 +1562,8 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def _update_highlight_from_playback(self, position_ms: int):
         """Updates highlighted unit based on media player position, for Play Audio mode."""
+        if self._ignore_playback_updates:  # ignore updates if we are in play section mode
+            return
         # Only update if the media player is actually playing or paused (e.g. seeking while paused)
         # Use positionChanged signal; this slot might be called even when stopped, but check state.
         if (
