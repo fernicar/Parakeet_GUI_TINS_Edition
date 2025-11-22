@@ -763,13 +763,83 @@ def load_srt_timed_text(srt_path: str):
 
 # --- SRT Saving Logic ---
 
-def save_timed_text_as_srt(structured_data: list, file_path: str | Path):
+def split_sentence_into_chunks(sentence_data: dict, max_chars: int = 80, tolerance: int = 20) -> list:
+    """
+    Splits a single sentence dictionary into multiple chunks based on character length constraints.
+    Uses word-level timing to calculate start/end times for each chunk.
+
+    Args:
+        sentence_data (dict): The original sentence dictionary with 'text', 'start_time', 'end_time', 'words'.
+        max_chars (int): Target maximum characters per subtitle block.
+        tolerance (int): Tolerance for the split point.
+
+    Returns:
+        list: A list of sentence dictionaries (chunks).
+    """
+    text = sentence_data.get('text', '')
+    words = sentence_data.get('words', [])
+    
+    if not words:
+        return [sentence_data]
+
+    hard_limit = max_chars + tolerance
+    
+    if len(text) <= hard_limit:
+        return [sentence_data]
+
+    chunks = []
+    current_chunk_words = []
+    current_chunk_text_len = 0
+    
+    for i, word in enumerate(words):
+        word_text = word.get('text', '')
+        word_len = len(word_text)
+        added_len = word_len + (1 if current_chunk_words else 0)
+        
+        if current_chunk_text_len + added_len > max_chars:
+            if current_chunk_text_len + added_len <= hard_limit:
+                current_chunk_words.append(word)
+                current_chunk_text_len += added_len
+            else:
+                if current_chunk_words:
+                    chunk_text = " ".join([w['text'] for w in current_chunk_words])
+                    chunk_start = current_chunk_words[0]['start_time']
+                    chunk_end = current_chunk_words[-1]['end_time']
+                    chunks.append({
+                        'text': chunk_text,
+                        'start_time': chunk_start,
+                        'end_time': chunk_end,
+                        'words': current_chunk_words
+                    })
+                
+                current_chunk_words = [word]
+                current_chunk_text_len = word_len
+        else:
+            current_chunk_words.append(word)
+            current_chunk_text_len += added_len
+
+    if current_chunk_words:
+        chunk_text = " ".join([w['text'] for w in current_chunk_words])
+        chunk_start = current_chunk_words[0]['start_time']
+        chunk_end = current_chunk_words[-1]['end_time']
+        chunks.append({
+            'text': chunk_text,
+            'start_time': chunk_start,
+            'end_time': chunk_end,
+            'words': current_chunk_words
+        })
+
+    return chunks
+
+def save_timed_text_as_srt(structured_data: list, file_path: str | Path, max_chars: int = 80, tolerance: int = 20):
     """
     Saves structured timed text data to a standard SRT file.
 
     Args:
         structured_data (list): List of sentence dicts following the specified structure.
         file_path (str | Path): Path to the desired output SRT file.
+        max_chars (int): Maximum characters per subtitle block (target).
+        tolerance (int): Tolerance for exceeding max_chars.
 
     Raises:
         SRTWriteError: If writing to the file fails.
@@ -787,31 +857,28 @@ def save_timed_text_as_srt(structured_data: list, file_path: str | Path):
 
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
+            srt_index = 1
             for i, sentence in enumerate(structured_data):
                 # Validate sentence structure minimally
                 if not isinstance(sentence, dict) or 'text' not in sentence or 'start_time' not in sentence or 'end_time' not in sentence:
                     print(f"WARNING: Skipping malformed sentence data at index {i}: {sentence}. Does not have required keys.", file=sys.stderr)
                     continue
 
-                text = str(sentence.get('text', '')).strip()
-                start_time = float(sentence.get('start_time', 0.0))
-                end_time = float(sentence.get('end_time', start_time + 0.1)) # Ensure end >= start fallback
-                if end_time < start_time: end_time = start_time + 0.01
+                chunks = split_sentence_into_chunks(sentence, max_chars, tolerance)
+                
+                for chunk in chunks:
+                    chunk_text = str(chunk.get('text', '')).strip()
+                    chunk_start = float(chunk.get('start_time', 0.0))
+                    chunk_end = float(chunk.get('end_time', chunk_start + 0.1))
+                    
+                    if chunk_end < chunk_start: chunk_end = chunk_start + 0.01
 
-                # Only write a block if there is text content
-                if text:
-                    # SRT block format:
-                    # Index
-                    # Start Time --> End Time
-                    # Text
-                    # (Blank Line)
-
-                    f.write(f"{i + 1}\n") # 1-based index
-                    f.write(f"{format_srt_timestamp(start_time)} --> {format_srt_timestamp(end_time)}\n")
-                    # Replace internal newlines in the text block with spaces for standard SRT, or handle multi-line if desired.
-                    # Standard SRT allows multi-line blocks. Let's keep internal newlines if present.
-                    f.write(f"{text}\n")
-                    f.write("\n") # Blank line separates blocks
+                    if chunk_text:
+                        f.write(f"{srt_index}\n") 
+                        f.write(f"{format_srt_timestamp(chunk_start)} --> {format_srt_timestamp(chunk_end)}\n")
+                        f.write(f"{chunk_text}\n")
+                        f.write("\n") 
+                        srt_index += 1
 
         print("SRT file written successfully.", file=sys.stderr)
 
@@ -1241,6 +1308,51 @@ Short block.
                     print("    Actual:", file=sys.stderr)
                     print(saved_content.strip(), file=sys.stderr)
                     test5_passed = False
+            
+            # --- Test 5b: Splitting Logic ---
+            print("\n  Testing Splitting Logic...", file=sys.stderr)
+            long_sentence_data = [{
+                'text': 'This is a very long sentence that should definitely be split into multiple parts because it exceeds the default character limit of ten characters for this specific test case.',
+                'start_time': 0.0, 'end_time': 10.0,
+                'words': [
+                    {'text': 'This', 'start_time': 0.0, 'end_time': 0.5},
+                    {'text': 'is', 'start_time': 0.5, 'end_time': 1.0},
+                    {'text': 'a', 'start_time': 1.0, 'end_time': 1.2},
+                    {'text': 'very', 'start_time': 1.2, 'end_time': 1.8},
+                    {'text': 'long', 'start_time': 1.8, 'end_time': 2.5},
+                    {'text': 'sentence', 'start_time': 2.5, 'end_time': 3.5},
+                    {'text': 'that', 'start_time': 3.5, 'end_time': 4.0},
+                    {'text': 'should', 'start_time': 4.0, 'end_time': 4.5},
+                    {'text': 'definitely', 'start_time': 4.5, 'end_time': 5.5},
+                    {'text': 'be', 'start_time': 5.5, 'end_time': 5.8},
+                    {'text': 'split', 'start_time': 5.8, 'end_time': 6.3},
+                    {'text': 'into', 'start_time': 6.3, 'end_time': 6.8},
+                    {'text': 'multiple', 'start_time': 6.8, 'end_time': 7.5},
+                    {'text': 'parts', 'start_time': 7.5, 'end_time': 8.0},
+                    {'text': 'because', 'start_time': 8.0, 'end_time': 8.5},
+                    {'text': 'it', 'start_time': 8.5, 'end_time': 8.7},
+                    {'text': 'exceeds', 'start_time': 8.7, 'end_time': 9.2},
+                    {'text': 'the', 'start_time': 9.2, 'end_time': 9.4},
+                    {'text': 'limit.', 'start_time': 9.4, 'end_time': 10.0}
+                ]
+            }]
+            # Test with small limit to force split
+            dummy_split_path = Path(tempfile.gettempdir()) / "dummy_test_split.srt"
+            save_timed_text_as_srt(long_sentence_data, str(dummy_split_path), max_chars=20, tolerance=5)
+            
+            with open(dummy_split_path, 'r', encoding='utf-8') as f:
+                split_content = f.read()
+            
+            print("  Split Saved content:", file=sys.stderr)
+            print(split_content, file=sys.stderr)
+            
+            if "2\n" in split_content:
+                 print("  Validation PASSED: Long sentence was split.", file=sys.stderr)
+            else:
+                 print("  Validation FAILED: Long sentence was NOT split.", file=sys.stderr)
+                 test5_passed = False
+            
+            if dummy_split_path.exists(): os.remove(dummy_split_path)
 
         except (SRTWriteError, OSError, IOError) as e:
             print(f"  Test Level 5 FAILED due to saving error: {e}", file=sys.stderr)
